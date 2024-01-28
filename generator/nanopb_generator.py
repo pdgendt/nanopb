@@ -606,7 +606,10 @@ class Field(ProtoElement):
 
         if desc.type == FieldD.TYPE_STRING and field_options.HasField("max_length"):
             # max_length overrides max_size for strings
-            self.max_size = field_options.max_length + 1
+            if type(field_options.max_length) is str:
+                self.max_size = f'({field_options.max_length} + 1)'
+            else:
+                self.max_size = field_options.max_length + 1
 
         if field_options.HasField("max_count"):
             self.max_count = field_options.max_count
@@ -621,7 +624,7 @@ class Field(ProtoElement):
             if self.max_count is None:
                 can_be_static = False
             else:
-                self.array_decl = '[%d]' % self.max_count
+                self.array_decl = f'[{self.max_count}]'
                 if field_options.fixed_count:
                   self.rules = 'FIXARRAY'
 
@@ -697,10 +700,13 @@ class Field(ProtoElement):
             self.ctype = 'char'
             if self.allocation == 'STATIC':
                 self.ctype = 'char'
-                self.array_decl += '[%d]' % self.max_size
+                self.array_decl += f'[{self.max_size}]'
                 # -1 because of null terminator. Both pb_encode and pb_decode
                 # check the presence of it.
-                self.enc_size = varint_max_size(self.max_size) + self.max_size - 1
+                if type(self.max_size) is int:
+                    self.enc_size = varint_max_size(self.max_size) + self.max_size - 1
+                else:
+                    self.enc_size = None
         elif desc.type == FieldD.TYPE_BYTES:
             if field_options.fixed_length:
                 self.pbtype = 'FIXED_LENGTH_BYTES'
@@ -709,15 +715,21 @@ class Field(ProtoElement):
                     raise Exception("Field '%s' is defined as fixed length, "
                                     "but max_size is not given." % self.name)
 
-                self.enc_size = varint_max_size(self.max_size) + self.max_size
+                self.array_decl += f'[{self.max_size}]'
                 self.ctype = 'pb_byte_t'
-                self.array_decl += '[%d]' % self.max_size
+                if type(self.max_size) is int:
+                    self.enc_size = varint_max_size(self.max_size) + self.max_size
+                else:
+                    self.enc_size = None
             else:
                 self.pbtype = 'BYTES'
                 self.ctype = 'pb_bytes_array_t'
                 if self.allocation == 'STATIC':
                     self.ctype = Globals.naming_style.bytes_type(self.struct_name, self.name)
-                    self.enc_size = varint_max_size(self.max_size) + self.max_size
+                    if type(self.max_size) is int:
+                        self.enc_size = varint_max_size(self.max_size) + self.max_size
+                    else:
+                        self.enc_size = None
         elif desc.type == FieldD.TYPE_MESSAGE:
             self.pbtype = 'MESSAGE'
             self.ctype = self.submsgname = names_from_type_name(desc.type_name)
@@ -786,7 +798,7 @@ class Field(ProtoElement):
     def types(self):
         '''Return definitions for any special types this field might need.'''
         if self.pbtype == 'BYTES' and self.allocation == 'STATIC':
-            result = 'typedef PB_BYTES_ARRAY_T(%d) %s;\n' % (self.max_size, Globals.naming_style.var_name(self.ctype))
+            result = f'typedef PB_BYTES_ARRAY_T({self.max_size}) {Globals.naming_style.var_name(self.ctype)};\n', 
         else:
             result = ''
         return result
@@ -868,9 +880,15 @@ class Field(ProtoElement):
         outer_init = None
         if self.allocation == 'STATIC':
             if self.rules == 'REPEATED':
-                outer_init = '0, {' + ', '.join([inner_init] * self.max_count) + '}'
+                if type(self.max_count) is int:
+                    outer_init = '0, {' + ', '.join([inner_init] * self.max_count) + '}'
+                else:
+                    outer_init = '0, {0}'
             elif self.rules == 'FIXARRAY':
-                outer_init = '{' + ', '.join([inner_init] * self.max_count) + '}'
+                if type(self.max_count) is int:
+                    outer_init = '{' + ', '.join([inner_init] * self.max_count) + '}'
+                else:
+                    outer_init = '0, {0}'
             elif self.rules == 'OPTIONAL':
                 if null_init or not self.default_has:
                     outer_init = 'false, ' + inner_init
